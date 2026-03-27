@@ -1,5 +1,4 @@
 using FbsDumper.Assembly;
-using FbsDumper.Context;
 using FbsDumper.Helpers;
 using FbsDumper.Instructions;
 using FbsDumper.Services;
@@ -105,7 +104,33 @@ public static class Parser
             Log.Global.LogProgress(done + 1, typeDefs.Count);
             var table = TypeHelper.TypeToTable(typeParser, typeDef);
 
-            schema.FlatTables.Add(table);
+            // Check if table with the same name already exists
+            var existingTable = schema.FlatTables.FirstOrDefault(t => t.TableName == table.TableName);
+            if (existingTable == null)
+            {
+                schema.FlatTables.Add(table);
+            }
+            else
+            {
+                // Compare field count and keep the one with more fields
+                var existingFieldCount = existingTable.Fields.Count;
+                var newFieldCount = table.Fields.Count;
+                
+                if (newFieldCount > existingFieldCount)
+                {
+                    Log.Info($"Replacing existing table {table.TableName} with longer version ({newFieldCount} vs {existingFieldCount} fields)");
+                    schema.FlatTables.Remove(existingTable);
+                    schema.FlatTables.Add(table);
+                }
+                else if (newFieldCount < existingFieldCount)
+                {
+                    Log.Info($"Skipping shorter duplicate table {table.TableName} ({newFieldCount} vs {existingFieldCount} fields)");
+                }
+                else
+                {
+                    Log.Info($"Skipping duplicate table {table.TableName} with same field count");
+                }
+            }
             done += 1;
         }
 
@@ -113,8 +138,16 @@ public static class Parser
         foreach (var fEnum in FlatEnumsToAdd.AsValueEnumerable().Select(TypeHelper.TypeToEnum))
             schema.FlatEnums.Add(fEnum);
 
-        var generation = new FileGenerationContext(outputFile, customNamespace, enumOut, forceSnakeCase, split);
-        FileGeneratorService.Write(schema, generation);
+        if (split)
+        {
+            Log.Info($"Writing split .fbs files to {outputFile}/...");
+            FileGeneratorService.WriteSplitFiles(schema, outputFile, customNamespace, enumOut, forceSnakeCase);
+        }
+        else
+        {
+            Log.Info($"Writing schema to {outputFile}...");
+            FileGeneratorService.WriteSingleFile(schema, outputFile, customNamespace, enumOut, forceSnakeCase);
+        }
 
         Log.Info("Done.");
     }
